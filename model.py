@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import math
+import tiktoken
 
 class DataEmbedding(nn.Module):
 
@@ -139,8 +140,11 @@ class Decoder(nn.Module):
 
 class Transformer(nn.Module):
 
-    def __init__(self,d_model:int,d_ff:int,head:int,seq_length:int,vocab_size:int,dropout:float,num_layers:int):
+    def __init__(self,d_model:int,d_ff:int,head:int,seq_length:int,dropout:float,num_layers:int):
         super().__init__()
+        self.tokenizer = tiktoken.get_encoding("gpt2")
+        vocab_size = self.tokenizer.n_vocab
+        self.seq_length=seq_length
         self.decoder=Decoder(d_model,d_ff,head,dropout,num_layers)
         self.data_embedder=DataEmbedding(d_model,vocab_size)
         self.positional_encoder=PositionalEncoding(d_model,seq_length,dropout)
@@ -149,9 +153,39 @@ class Transformer(nn.Module):
         self.to(self.device)
 
     def forward(self,x):
+
         x=x.to(self.device)
         embedded=self.data_embedder(x)
         pos=self.positional_encoder(embedded)
         out=self.decoder(pos)
         out=self.linear(out)
         return out
+
+    def encode(self,text):
+        ids = self.tokenizer.encode(text)
+        return torch.tensor(ids, dtype=torch.long).unsqueeze(0)
+
+    def decode(self,ids):
+        ids = ids.squeeze().tolist()
+        return self.tokenizer.decode(ids)
+
+    def generate(self,text:str,max_tokens:int=50):
+        self.eval()
+        ids=self.encode(text)
+
+        with torch.no_grad():
+            for _ in range(max_tokens):
+                inputs=ids[:,-self.seq_length:]
+                logits=self.forward(inputs)
+                next_logits=logits[0,-1,:]
+                next_id=torch.argmax(next_logits)
+                next_ids=next_id.view(1,1).to(ids.device)
+                ids=torch.cat([ids,next_ids],dim=1)
+
+        self.train()
+        return self.decode(ids)
+
+
+
+    
+    
